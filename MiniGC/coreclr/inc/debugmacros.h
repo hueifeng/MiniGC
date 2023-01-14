@@ -28,32 +28,32 @@ bool GetStackTraceAtContext(SString & s, struct _CONTEXT * pContext);
 
 bool _DbgBreakCheck(LPCSTR szFile, int iLine, LPCSTR szExpr, BOOL fConstrained = FALSE);
 
-extern VOID ANALYZER_NORETURN DbgAssertDialog(const char *szFile, int iLine, const char *szExpr);
+//extern VOID ANALYZER_NORETURN DbgAssertDialog(const char *szFile, int iLine, const char *szExpr);
 
 #define PRE_ASSERTE         /* if you need to change modes before doing asserts override */
 #define POST_ASSERTE        /* put it back */
 
-#if !defined(_ASSERTE_MSG)
-  #define _ASSERTE_MSG(expr, msg)                                           \
-        do {                                                                \
-             if (!(expr)) {                                                 \
-                PRE_ASSERTE                                                 \
-                DbgAssertDialog(__FILE__, __LINE__, msg);                   \
-                POST_ASSERTE                                                \
-             }                                                              \
-        } while (0)
-#endif // _ASSERTE_MSG
-
-#if !defined(_ASSERTE)
-  #define _ASSERTE(expr) _ASSERTE_MSG(expr, #expr)
-#endif  // !_ASSERTE
-
-
-#define VERIFY(stmt) _ASSERTE((stmt))
-
-#define _ASSERTE_ALL_BUILDS(expr) _ASSERTE((expr))
-
-#else // !_DEBUG
+//#if !defined(_ASSERTE_MSG)
+//  #define _ASSERTE_MSG(expr, msg)                                           \
+//        do {                                                                \
+//             if (!(expr)) {                                                 \
+//                PRE_ASSERTE                                                 \
+//                DbgAssertDialog(__FILE__, __LINE__, msg);                   \
+//                POST_ASSERTE                                                \
+//             }                                                              \
+//        } while (0)
+//#endif // _ASSERTE_MSG
+//
+//#if !defined(_ASSERTE)
+//  #define _ASSERTE(expr) _ASSERTE_MSG(expr, #expr)
+//#endif  // !_ASSERTE
+//
+//
+//#define VERIFY(stmt) _ASSERTE((stmt))
+//
+//#define _ASSERTE_ALL_BUILDS(expr) _ASSERTE((expr))
+//
+//#else // !_DEBUG
 
 #define _ASSERTE(expr) ((void)0)
 #define _ASSERTE_MSG(expr, msg) ((void)0)
