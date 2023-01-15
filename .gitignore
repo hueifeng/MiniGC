@@ -44,3 +44,5 @@ bld/
 [Ll]og/
 
 .vs/
+/host_trace.txt
+/ConsoleApp1/host_trace.txt
