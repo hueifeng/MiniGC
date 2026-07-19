@@ -78,16 +78,23 @@ jobs:
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        # windows-latest ships VS 2022 and msbuild on PATH, but cmake and
-        # dumpbin / cl.exe / link.exe are gated behind vcvarsall.bat. We
-        # resolve the latest VS install through vswhere and source
-        # vcvars64.bat to bring the toolchain into the same cmd.exe session
-        # that runs cmake / dumpbin.
+        # windows-latest ships VS 2022 and msbuild on PATH, but cl.exe /
+        # link.exe / dumpbin are gated behind vcvars64.bat. We resolve the
+        # latest VS install through vswhere and source vcvars64.bat to
+        # bring the toolchain into the same cmd.exe session that runs
+        # cmake / dumpbin.
+        #
+        # We use the NMake Makefiles generator here rather than the
+        # "Visual Studio 17 2022" generator because the VS generator
+        # relies on registry-discovered instances and, on this runner
+        # image, cmake cannot find one even after vcvars is sourced.
+        # NMake is shipped with VS itself, so once vcvars is up the
+        # nmake binary and cl.exe are both on PATH.
         shell: cmd
         run: |
           for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS_INSTALL=%%i
           call "%VS_INSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul
-          cmake -S MiniGC -B MiniGC/build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake -S MiniGC -B MiniGC/build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
@@ -95,7 +102,7 @@ jobs:
         run: |
           for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS_INSTALL=%%i
           call "%VS_INSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul
-          cmake --build MiniGC/build --config Release --parallel
+          cmake --build MiniGC/build --parallel
 
       - name: Verify symbol exports (Windows)
         if: runner.os == 'Windows'
@@ -103,7 +110,7 @@ jobs:
         run: |
           for /f "usebackq delims=" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS_INSTALL=%%i
           call "%VS_INSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul
-          set DYLIB=MiniGC\build\Release\MiniGC.dll
+          set DYLIB=MiniGC\build\MiniGC.dll
           if not exist "%DYLIB%" (
             echo ERROR: %DYLIB% was not produced
             dir MiniGC\build\
