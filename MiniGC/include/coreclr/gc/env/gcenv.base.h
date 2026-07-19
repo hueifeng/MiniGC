@@ -45,11 +45,12 @@
 #define SSIZE_T_MAX ((ptrdiff_t)(SIZE_T_MAX / 2))
 #endif
 
-#ifndef __has_builtin
-#define __has_builtin(x) 0
-#endif
+#ifdef TARGET_UNIX
+#include <cstddef>
 
-#ifndef _INC_WINDOWS
+#ifndef DECLSPEC_NORETURN
+#define DECLSPEC_NORETURN __attribute__((noreturn))
+#endif
 // -----------------------------------------------------------------------------------------------------------
 //
 // Aliases for Win32 types
@@ -58,8 +59,11 @@
 typedef int BOOL;
 typedef uint32_t DWORD;
 typedef uint64_t DWORD64;
+#ifdef _MSC_VER
+typedef unsigned long ULONG;
+#else
 typedef uint32_t ULONG;
-
+#endif
 // -----------------------------------------------------------------------------------------------------------
 // HRESULT subset.
 
@@ -80,12 +84,8 @@ inline HRESULT HRESULT_FROM_WIN32(unsigned long x)
 
 #define S_OK                                   0x0
 #define E_FAIL                                 0x80004005
+#define E_INVALIDARG                           0x80070057
 #define E_OUTOFMEMORY                          0x8007000E
-#define COR_E_EXECUTIONENGINE                  0x80131506
-#define CLR_E_GC_BAD_AFFINITY_CONFIG           0x8013200A
-#define CLR_E_GC_BAD_AFFINITY_CONFIG_FORMAT    0x8013200B
-#define CLR_E_GC_BAD_HARD_LIMIT                0x8013200D
-#define CLR_E_GC_LARGE_PAGE_MISSING_HARD_LIMIT 0x8013200E
 
 #define NOERROR                 0x0
 #define ERROR_TIMEOUT           1460
@@ -100,14 +100,6 @@ inline HRESULT HRESULT_FROM_WIN32(unsigned long x)
 
 #define ZeroMemory(Destination,Length) memset((Destination),0,(Length))
 
-#ifndef min
-#define min(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef max
-#define max(a,b) (((a) > (b)) ? (a) : (b))
-#endif
-
 #define C_ASSERT(cond) static_assert( cond, #cond )
 
 #define UNREFERENCED_PARAMETER(P)          (void)(P)
@@ -120,12 +112,8 @@ inline HRESULT HRESULT_FROM_WIN32(unsigned long x)
 #endif
 
 #ifdef UNICODE
-#define _tcslen wcslen
-#define _tcscpy wcscpy
 #define _tfopen _wfopen
 #else
-#define _tcslen strlen
-#define _tcscpy strcpy
 #define _tfopen fopen
 #endif
 
@@ -155,7 +143,10 @@ typedef DWORD (WINAPI *PTHREAD_START_ROUTINE)(void* lpThreadParameter);
   #pragma intrinsic(__dmb)
   #define MemoryBarrier() { __dmb(_ARM64_BARRIER_SY); }
 
- #elif defined(HOST_AMD64)
+ #elif defined(HOST_BROWSER)
+  #define YieldProcessor()
+  #define MemoryBarrier __sync_synchronize
+#elif defined(HOST_AMD64)
 
   extern "C" void
   _mm_pause (
@@ -224,6 +215,11 @@ typedef DWORD (WINAPI *PTHREAD_START_ROUTINE)(void* lpThreadParameter);
  #define YieldProcessor() __asm__ volatile( "dbar 0; \n")
  #define MemoryBarrier __sync_synchronize
 #endif // __loongarch64
+
+#ifdef __riscv
+ #define YieldProcessor() asm volatile( ".word 0x0100000f");
+ #define MemoryBarrier __sync_synchronize
+#endif // __riscv
 
 #endif // _MSC_VER
 
@@ -298,12 +294,12 @@ inline uint8_t BitScanReverse(uint32_t *bitIndex, uint32_t mask)
 #ifdef _MSC_VER
     return _BitScanReverse((unsigned long*)bitIndex, mask);
 #else // _MSC_VER
-    // The result of __builtin_clzl is undefined when mask is zero,
+    // The result of __builtin_clz is undefined when mask is zero,
     // but it's still OK to call the intrinsic in that case (just don't use the output).
     // Unconditionally calling the intrinsic in this way allows the compiler to
     // emit branchless code for this function when possible (depending on how the
     // intrinsic is implemented for the target platform).
-    int lzcount = __builtin_clzl(mask);
+    int lzcount = __builtin_clz(mask);
     *bitIndex = static_cast<uint32_t>(31 - lzcount);
     return mask != 0 ? TRUE : FALSE;
 #endif // _MSC_VER
@@ -341,6 +337,14 @@ inline uint8_t BitScanReverse64(uint32_t *bitIndex, uint64_t mask)
     return mask != 0 ? TRUE : FALSE;
 #endif // _MSC_VER
 }
+#endif // TARGET_UNIX
+
+#define COR_E_EXECUTIONENGINE                  0x80131506
+#define CLR_E_GC_BAD_AFFINITY_CONFIG           0x8013200A
+#define CLR_E_GC_BAD_AFFINITY_CONFIG_FORMAT    0x8013200B
+#define CLR_E_GC_BAD_HARD_LIMIT                0x8013200D
+#define CLR_E_GC_LARGE_PAGE_MISSING_HARD_LIMIT 0x8013200E
+#define CLR_E_GC_BAD_REGION_SIZE               0x8013200F
 
 // Aligns a size_t to the specified alignment. Alignment must be a power
 // of two.
@@ -387,22 +391,9 @@ inline void* ALIGN_DOWN(void* ptr, size_t alignment)
     return reinterpret_cast<void*>(ALIGN_DOWN(as_size_t, alignment));
 }
 
-inline int GetRandomInt(int max)
-{
-    return rand() % max;
-}
-
-typedef struct _PROCESSOR_NUMBER {
-    uint16_t Group;
-    uint8_t Number;
-    uint8_t Reserved;
-} PROCESSOR_NUMBER, *PPROCESSOR_NUMBER;
-
-#endif // _INC_WINDOWS
-
 // -----------------------------------------------------------------------------------------------------------
 //
-// The subset of the contract code required by the GC/HandleTable sources. If Redhawk moves to support
+// The subset of the contract code required by the GC/HandleTable sources. If NativeAOT moves to support
 // contracts these local definitions will disappear and be replaced by real implementations.
 //
 
@@ -475,7 +466,7 @@ typedef DPTR(uint8_t)   PTR_uint8_t;
 #define _ASSERTE(_expr) ASSERT(_expr)
 #endif
 #define CONSISTENCY_CHECK(_expr) ASSERT(_expr)
-#define PREFIX_ASSUME(cond) ASSERT(cond)
+#define COMPILER_ASSUME(cond) ASSERT(cond)
 #define EEPOLICY_HANDLE_FATAL_ERROR(error) ASSERT(!"EEPOLICY_HANDLE_FATAL_ERROR")
 #define UI64(_literal) _literal##ULL
 
@@ -484,8 +475,6 @@ class MethodTable;
 class Object;
 class ArrayBase;
 
-// Various types used to refer to object references or handles. This will get more complex if we decide
-// Redhawk wants to wrap object references in the debug build.
 typedef DPTR(Object) PTR_Object;
 typedef DPTR(PTR_Object) PTR_PTR_Object;
 

@@ -75,11 +75,15 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>native;coreclr\gc;coreclr\gc\env;coreclr\vm;coreclr\pal\prebuilt\inc;coreclr\inc;$(IncludePath)</IncludePath>
+    <IncludePath>include\coreclr\inc;include\coreclr\pal\prebuilt\inc;include\coreclr\vm;include\coreclr\gc\env;include\coreclr\gc;include\native;$(IncludePath)</IncludePath>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>native;coreclr\gc;coreclr\gc\env;coreclr\vm;coreclr\pal\prebuilt\inc;coreclr\inc;$(IncludePath)</IncludePath>
+    <IncludePath>include\coreclr\inc;include\coreclr\pal\prebuilt\inc;include\coreclr\vm;include\coreclr\gc\env;include\coreclr\gc;include\native;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>include\coreclr\inc;include\coreclr\pal\prebuilt\inc;include\coreclr\vm;include\coreclr\gc\env;include\coreclr\gc;include\native;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

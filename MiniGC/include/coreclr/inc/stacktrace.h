@@ -7,10 +7,26 @@
 #ifndef __STACK_TRACE_H__
 #define __STACK_TRACE_H__
 
+#if defined(TARGET_UNIX)
+#include <cstddef>
+typedef void* HINSTANCE;
+#ifndef _Out_writes_
+#define _Out_writes_(count)
+#endif
+#ifndef CHAR
+typedef char CHAR;
+#endif
+#ifndef UINT
+typedef unsigned int UINT;
+#endif
+#else
 HINSTANCE LoadImageHlp();
 HINSTANCE LoadDbgHelp();
+#endif
 
+#if !defined(TARGET_UNIX)
 #include <specstrings.h>
+#endif
 
 //
 //--- Constants ---------------------------------------------------------------
@@ -62,16 +78,6 @@ void MagicDeinit(void);
 *           0x<address>: <module>! <symbol> + 0x<offset>
 ******************************************************************** robch */
 void GetStringFromStackLevels(UINT ifrStart, UINT cfrTotal, _Out_writes_(cchMaxAssertStackLevelStringLen * cfrTotal) CHAR *pszString, struct _CONTEXT * pContext = NULL);
-
-/****************************************************************************
-* GetStringFromAddr *
-*-------------------*
-*   Description:
-*       Builds a string from an address in the format:
-*
-*           0x<address>: <module>! <symbol> + 0x<offset>
-******************************************************************** robch */
-void GetStringFromAddr(DWORD_PTR dwAddr, _Out_writes_(cchMaxAssertStackLevelStringLen) LPSTR szString);
 
 #if defined(HOST_X86) && !defined(TARGET_UNIX)
 /****************************************************************************

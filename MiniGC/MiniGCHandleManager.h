@@ -1,11 +1,12 @@
 #pragma once
+#include "MiniGCPlatform.h"
 #include "debugmacros.h"
 #include "gcenv.base.h"
 #include "gcinterface.h"
 
 class MiniGCHandleManager : public IGCHandleManager
 {
-	// Í¨¹ý IGCHandleManager ¼Ì³Ð
+	// é€šè¿‡ IGCHandleManager ç»§æ‰¿
 	virtual bool Initialize() override;
 	virtual void Shutdown() override;
 	virtual IGCHandleStore* GetGlobalHandleStore() override;

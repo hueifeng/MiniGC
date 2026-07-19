@@ -1,4 +1,5 @@
 #pragma once
+#include "MiniGCPlatform.h"
 #include "debugmacros.h"
 #include "gcenv.base.h"
 #include "gcinterface.h"
@@ -9,16 +10,15 @@ class MiniGCHeap : public IGCHeap
 public:
     static IGCToCLR* gcToCLR;
 private:
-	MiniGCHandleManager* handleManager;
+	IGCHandleManager* handleManager;
 public:
 	MiniGCHeap(IGCToCLR* gcToCLR, IGCHandleManager* handleManager)
 	{
 		MiniGCHeap::gcToCLR = gcToCLR;
-		//this->handleManager = handleManager;
-		// this->gcToCLR = gcToCLR;
+		this->handleManager = handleManager;
 	}
 	static bool gcInProgress;
-	// 通过 IGCHeap 继承
+	// 閫氳繃 IGCHeap 缁ф壙
 	virtual bool IsValidSegmentSize(size_t size) override;
 
 	virtual bool IsValidGen0MaxSize(size_t size) override;
@@ -182,10 +182,33 @@ public:
 	virtual void EnumerateConfigurationValues(void* context, ConfigurationValueFunc configurationValueFunc) override;
 
 
-	// 通过 IGCHeap 继承
-	virtual void UpdateFrozenSegment(segment_handle seg, uint8_t* allocated, uint8_t* committed);
+	// 閫氳繃 IGCHeap 缁ф壙
+	virtual void UpdateFrozenSegment(segment_handle seg, uint8_t* allocated, uint8_t* committed) override;
+
+	virtual int RefreshMemoryLimit() override;
+	virtual enable_no_gc_region_callback_status EnableNoGCRegionCallback(NoGCRegionCallbackFinalizerWorkItem* callback, uint64_t callback_threshold) override;
+	virtual FinalizerWorkItem* GetExtraWorkForFinalization() override;
+	virtual uint64_t GetGenerationBudget(int generation) override;
+	virtual size_t GetLOHThreshold() override;
+	virtual void DiagWalkHeapWithACHandling(walk_fn fn, void* context, int gen_number, bool walk_large_object_heap_p) override;
+	virtual void NullBridgeObjectsWeakRefs(size_t length, void* unreachableObjectHandles) override;
 
 	static void MarkReachableRoot(Object** ppObject, ScanContext* sc, uint32_t flags);
 	static void MarkObjectTransitively(Object* obj, ScanContext* sc, uint32_t flags);
-	void registerSegment(uint8_t* new_pages);
+	bool registerSegment(uint8_t* new_pages);
 };
+
+// ============================================================================
+// GC <-> EE shared globals
+//
+// CoreCLR's write barrier and SOS look these up by name. They are declared
+// extern "C" in coreclr gc.h, so the GC DLL must export them as unmangled
+// C symbols with these exact names. Definitions live in MiniGCHeap.cpp.
+// ============================================================================
+extern "C" {
+    extern uint32_t  g_max_generation;
+    extern uint8_t*  g_gc_lowest_address;
+    extern uint8_t*  g_gc_highest_address;
+    extern uint32_t* g_gc_card_table;
+    extern uint32_t* g_gc_card_bundle_table;
+}

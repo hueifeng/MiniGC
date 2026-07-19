@@ -1,5 +1,14 @@
 ﻿#pragma once
 
-#define WIN32_LEAN_AND_MEAN             // 从 Windows 头文件中排除极少使用的内容
-// Windows 头文件
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#ifndef TARGET_UNIX
+#define TARGET_UNIX 1
+#endif
+#ifndef DECLSPEC_NORETURN
+#define DECLSPEC_NORETURN __attribute__((noreturn))
+#endif
+#include <cstddef>
+#endif

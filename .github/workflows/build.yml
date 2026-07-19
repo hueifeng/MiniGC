@@ -1,0 +1,75 @@
+name: build
+
+# Verifies that MiniGC's native GC DLL compiles on each platform that
+# the project supports. Runtime integration (DOTNET_GCPath) is verified
+# out-of-band on developer machines because the GitHub-hosted runners
+# pin specific .NET SDK versions and we want to keep the matrix small
+# and fast. This workflow catches toolchain / header regressions in the
+# cross-platform code path early.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-native:
+    name: native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: libMiniGC.so
+          - os: macos-latest
+            artifact_name: libMiniGC.dylib
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja
+
+      - name: Configure
+        run: |
+          cmake -S MiniGC -B MiniGC/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build MiniGC/build --parallel
+
+      - name: Verify symbol exports
+        shell: bash
+        run: |
+          set -e
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            DYLIB="MiniGC/build/libMiniGC.so"
+          else
+            DYLIB="MiniGC/build/libMiniGC.dylib"
+          fi
+          if [ ! -f "$DYLIB" ]; then
+            echo "ERROR: $DYLIB was not produced"
+            ls -la MiniGC/build/
+            exit 1
+          fi
+          # The two entry points CoreCLR dlopen()s. Their absence means the
+          # hidden-visibility settings broke the GC-EE contract.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            objdump -T "$DYLIB" | grep -E ' GC_Initialize$| GC_VersionInfo$'
+          else
+            nm -gU "$DYLIB" | grep -E '_GC_Initialize$|_GC_VersionInfo$'
+          fi
+
+      - name: Build GcDemo (BCL only, no NuGet)
+        run: dotnet build GcDemo/GcDemo.csproj -c Release

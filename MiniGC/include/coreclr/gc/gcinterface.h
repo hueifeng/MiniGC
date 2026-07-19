@@ -4,14 +4,18 @@
 #ifndef _GC_INTERFACE_H_
 #define _GC_INTERFACE_H_
 
-// The major version of the GC/EE interface. Breaking changes to this interface
+// The major version of the IGCHeap interface. Breaking changes to this interface
 // require bumps in the major version number.
 #define GC_INTERFACE_MAJOR_VERSION 5
 
-// The minor version of the GC/EE interface. Non-breaking changes are required
+// The minor version of the IGCHeap interface. Non-breaking changes are required
 // to bump the minor version number. GCs and EEs with minor version number
-// mismatches can still interopate correctly, with some care.
-#define GC_INTERFACE_MINOR_VERSION 1
+// mismatches can still interoperate correctly, with some care.
+#define GC_INTERFACE_MINOR_VERSION 5
+
+// The major version of the IGCToCLR interface. Breaking changes to this interface
+// require bumps in the major version number.
+#define EE_INTERFACE_MAJOR_VERSION 4
 
 struct ScanContext;
 struct gc_alloc_context;
@@ -25,14 +29,6 @@ typedef void enum_alloc_context_func(gc_alloc_context*, void*);
 
 // Callback passed to CreateBackgroundThread.
 typedef uint32_t (__stdcall *GCBackgroundThreadFunction)(void* param);
-
-// Struct often used as a parameter to callbacks.
-typedef struct
-{
-    promote_func*  f;
-    ScanContext*   sc;
-    CrawlFrame *   cf;
-} GCCONTEXT;
 
 // SUSPEND_REASON is the reason why the GC wishes to suspend the EE,
 // used as an argument to IGCToCLR::SuspendEE.
@@ -119,6 +115,18 @@ struct WriteBarrierParameters
     bool region_use_bitwise_write_barrier;
 };
 
+struct FinalizerWorkItem
+{
+    FinalizerWorkItem* next;
+    void (*callback)(FinalizerWorkItem*);
+};
+
+struct NoGCRegionCallbackFinalizerWorkItem : public FinalizerWorkItem
+{
+    bool scheduled;
+    bool abandoned;
+};
+
 struct EtwGCSettingsInfo
 {
     size_t heap_hard_limit;
@@ -134,6 +142,40 @@ struct EtwGCSettingsInfo
     bool hard_limit_config_p;
     bool no_affinitize_p;
 };
+
+// These definitions are also in managed code.
+struct StronglyConnectedComponent
+{
+    size_t Count;
+    uintptr_t* Contexts;
+};
+
+struct ComponentCrossReference
+{
+    size_t SourceGroupIndex;
+    size_t DestinationGroupIndex;
+};
+
+struct MarkCrossReferencesArgs
+{
+    size_t ComponentCount;
+    StronglyConnectedComponent* Components;
+    size_t CrossReferenceCount;
+    ComponentCrossReference* CrossReferences;
+
+    MarkCrossReferencesArgs(
+        size_t componentCount,
+        StronglyConnectedComponent* components,
+        size_t crossReferenceCount,
+        ComponentCrossReference* crossReferences)
+        : ComponentCount { componentCount }
+        , Components { components }
+        , CrossReferenceCount { crossReferenceCount }
+        , CrossReferences { crossReferences }
+    {
+    }
+};
+
 
 // Opaque type for tracking object pointers
 #ifndef DACCESS_COMPILE
@@ -261,7 +303,7 @@ enum GCEventKeyword
     GCEventKeyword_GCHeapDump                    =  0x100000,
     GCEventKeyword_GCSampledObjectAllocationHigh =  0x200000,
     GCEventKeyword_GCHeapSurvivalAndMovement     =  0x400000,
-    GCEventKeyword_GCHeapCollect                 =  0x800000,
+    GCEventKeyword_ManagedHeapCollect            =  0x800000,
     GCEventKeyword_GCHeapAndTypeNames            = 0x1000000,
     GCEventKeyword_GCSampledObjectAllocationLow  = 0x2000000,
     GCEventKeyword_All = GCEventKeyword_GC
@@ -271,7 +313,7 @@ enum GCEventKeyword
       | GCEventKeyword_GCHeapDump
       | GCEventKeyword_GCSampledObjectAllocationHigh
       | GCEventKeyword_GCHeapSurvivalAndMovement
-      | GCEventKeyword_GCHeapCollect
+      | GCEventKeyword_ManagedHeapCollect
       | GCEventKeyword_GCHeapAndTypeNames
       | GCEventKeyword_GCSampledObjectAllocationLow
 };
@@ -320,6 +362,27 @@ enum end_no_gc_region_status
     end_no_gc_not_in_progress = 1,
     end_no_gc_induced = 2,
     end_no_gc_alloc_exceeded = 3
+};
+
+// !!!!!!!!!!!!!!!!!!!!!!!
+// make sure you change the def in bcl\system\gc.cs
+// if you change this!
+enum refresh_memory_limit_status
+{
+    refresh_success = 0,
+    refresh_hard_limit_too_low = 1,
+    refresh_hard_limit_invalid = 2
+};
+
+// !!!!!!!!!!!!!!!!!!!!!!!
+// make sure you change the def in bcl\system\gc.cs
+// if you change this!
+enum enable_no_gc_region_callback_status
+{
+    succeed,
+    not_started,
+    insufficient_budget,
+    already_registered,
 };
 
 enum gc_kind
@@ -397,6 +460,7 @@ typedef enum
      * but are useful when the handle owner needs an efficient way to change the
      * strength of a handle on the fly.
      *
+     * NOTE: HNDTYPE_VARIABLE is not used currently.
      */
     HNDTYPE_VARIABLE     = 4,
 
@@ -405,9 +469,6 @@ typedef enum
      *
      * Refcounted handles are handles that behave as strong handles while the
      * refcount on them is greater than 0 and behave as weak handles otherwise.
-     *
-     * N.B. These are currently NOT general purpose.
-     *      The implementation is tied to COM Interop.
      *
      */
     HNDTYPE_REFCOUNTED   = 5,
@@ -432,14 +493,11 @@ typedef enum
     /*
      * PINNED HANDLES for asynchronous operation
      *
-     * Pinned handles are strong handles which have the added property that they
-     * prevent an object from moving during a garbage collection cycle.  This is
-     * useful when passing a pointer to object innards out of the runtime while GC
-     * may be enabled.
+     * Pinned async handles are strong handles that pin a buffer or array of buffers owned
+     * by System.Threading.Overlapped instance.
      *
-     * NOTE:  PINNING AN OBJECT IS EXPENSIVE AS IT PREVENTS THE GC FROM ACHIEVING
-     *        OPTIMAL PACKING OF OBJECTS DURING EPHEMERAL COLLECTIONS.  THIS TYPE
-     *        OF HANDLE SHOULD BE USED SPARINGLY!
+     * NOTE: HNDTYPE_ASYNCPINNED is no longer used in the VM starting .NET 8
+     *       but we are keeping it here for backward compatibility purposes"
      */
     HNDTYPE_ASYNCPINNED  = 7,
 
@@ -451,6 +509,8 @@ typedef enum
      * are scanned as strong roots during each GC but only during full GCs would the size
      * be calculated.
      *
+     * NOTE: HNDTYPE_SIZEDREF is no longer used in the VM starting .NET 9
+     *       but we are keeping it here for backward compatibility purposes"
      */
     HNDTYPE_SIZEDREF     = 8,
 
@@ -468,9 +528,26 @@ typedef enum
      *
      * NOTE: HNDTYPE_WEAK_NATIVE_COM is no longer used in the VM starting .NET 8
      *       but we are keeping it here for backward compatibility purposes"
-     * 
+     *
      */
-    HNDTYPE_WEAK_NATIVE_COM   = 9
+    HNDTYPE_WEAK_NATIVE_COM   = 9,
+
+    /*
+     * INTERIOR POINTER HANDLES
+     *
+     * Interior pointer handles allow the vm to request that the GC keep an interior pointer to
+     * a given object updated to keep pointing at the same location within an object. These handles
+     * have an extra pointer which points at an interior pointer into the first object.
+     *
+     */
+    HNDTYPE_WEAK_INTERIOR_POINTER = 10,
+
+    /*
+     * CROSSREFERENCE HANDLES
+     *
+     * Crossreference handles are used to track the lifetime of an object in another VM heap.
+     */
+    HNDTYPE_CROSSREFERENCE = 11
 } HandleType;
 
 typedef enum
@@ -484,7 +561,7 @@ typedef bool (* walk_fn)(Object*, void*);
 typedef bool (* walk_fn2)(Object*, uint8_t**, void*);
 typedef void (* gen_walk_fn)(void* context, int generation, uint8_t* range_start, uint8_t* range_end, uint8_t* range_reserved);
 typedef void (* record_surv_fn)(uint8_t* begin, uint8_t* end, ptrdiff_t reloc, void* context, bool compacting_p, bool bgc_p);
-typedef void (* fq_walk_fn)(bool, void*);
+typedef void (* fq_walk_fn)(bool isCritical, void* pObject);
 typedef void (* fq_scan_fn)(Object** ppObject, ScanContext *pSC, uint32_t dwFlags);
 typedef void (* handle_scan_fn)(Object** pRef, Object* pSec, uint32_t flags, ScanContext* context, bool isDependent);
 typedef bool (* async_pin_enum_fn)(Object* object, void* context);
@@ -561,12 +638,15 @@ enum class GCConfigurationType
 {
     Int64,
     StringUtf8,
-    Boolean 
+    Boolean
 };
 
 using ConfigurationValueFunc = void (*)(void* context, void* name, void* publicKey, GCConfigurationType type, int64_t data);
 
 // IGCHeap is the interface that the VM will use when interacting with the GC.
+// NOTE!
+// Only add methods to the end.
+// Do not add overloaded methods. Always use a different name.
 class IGCHeap {
 public:
     /*
@@ -714,6 +794,7 @@ public:
 
     // Returns the generation in which obj is found. Also used by the VM
     // in some places, in particular syncblk code.
+    // Returns INT32_MAX if obj belongs to a non-GC heap.
     virtual unsigned WhichGeneration(Object* obj) PURE_VIRTUAL
 
     // Returns the number of GCs that have transpired in the given generation
@@ -969,6 +1050,24 @@ public:
 
     // Updates given frozen segment
     virtual void UpdateFrozenSegment(segment_handle seg, uint8_t* allocated, uint8_t* committed) PURE_VIRTUAL
+
+    // Refresh the memory limit
+    virtual int RefreshMemoryLimit() PURE_VIRTUAL
+
+    // Enable NoGCRegionCallback
+    virtual enable_no_gc_region_callback_status EnableNoGCRegionCallback(NoGCRegionCallbackFinalizerWorkItem* callback, uint64_t callback_threshold) PURE_VIRTUAL
+
+    // Get extra work for the finalizer
+    virtual FinalizerWorkItem* GetExtraWorkForFinalization() PURE_VIRTUAL
+
+    virtual uint64_t GetGenerationBudget(int generation) PURE_VIRTUAL
+
+    virtual size_t GetLOHThreshold() PURE_VIRTUAL
+
+    // Walk the heap object by object outside of a GC.
+    virtual void DiagWalkHeapWithACHandling(walk_fn fn, void* context, int gen_number, bool walk_large_object_heap_p) PURE_VIRTUAL
+
+    virtual void NullBridgeObjectsWeakRefs(size_t length, void* unreachableObjectHandles) PURE_VIRTUAL;
 };
 
 #ifdef WRITE_BARRIER_CHECK
@@ -980,14 +1079,16 @@ void updateGCShadow(Object** ptr, Object* val);
 #define GC_CALL_INTERIOR            0x1
 #define GC_CALL_PINNED              0x2
 
-// keep in sync with GC_ALLOC_FLAGS in GC.cs
+// keep in sync with GC_ALLOC_FLAGS in GC.CoreCLR.cs
 enum GC_ALLOC_FLAGS
 {
     GC_ALLOC_NO_FLAGS           = 0,
     GC_ALLOC_FINALIZE           = 1,
     GC_ALLOC_CONTAINS_REF       = 2,
     GC_ALLOC_ALIGN8_BIAS        = 4,
-    GC_ALLOC_ALIGN8             = 8,
+    GC_ALLOC_ALIGN8             = 8, // Only implies the initial allocation is 8 byte aligned.
+                                     // Preserving the alignment across relocation depends on
+                                     // RESPECT_LARGE_ALIGNMENT also being defined.
     GC_ALLOC_ZEROING_OPTIONAL   = 16,
     GC_ALLOC_LARGE_OBJECT_HEAP  = 32,
     GC_ALLOC_PINNED_OBJECT_HEAP = 64,
@@ -1021,6 +1122,7 @@ struct ScanContext
 {
     Thread* thread_under_crawl;
     int thread_number;
+    int thread_count;
     uintptr_t stack_limit; // Lowest point on the thread stack that the scanning logic is permitted to read
     bool promotion; //TRUE: Promotion, FALSE: Relocation.
     bool concurrent; //TRUE: concurrent scanning
@@ -1038,6 +1140,7 @@ struct ScanContext
 
         thread_under_crawl = 0;
         thread_number = -1;
+        thread_count = -1;
         stack_limit = 0;
         promotion = false;
         concurrent = false;
@@ -1057,11 +1160,17 @@ struct VersionInfo {
     const char* Name;
 };
 
-typedef void (*GC_VersionInfoFunction)(
+#ifdef TARGET_X86
+#define LOCALGC_CALLCONV __cdecl
+#else
+#define LOCALGC_CALLCONV
+#endif
+
+typedef void (LOCALGC_CALLCONV *GC_VersionInfoFunction)(
     /* Out */ VersionInfo*
 );
 
-typedef HRESULT (*GC_InitializeFunction)(
+typedef HRESULT (LOCALGC_CALLCONV *GC_InitializeFunction)(
     /* In  */ IGCToCLR*,
     /* Out */ IGCHeap**,
     /* Out */ IGCHandleManager**,
