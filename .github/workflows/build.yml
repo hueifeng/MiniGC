@@ -22,9 +22,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: libMiniGC.so
           - os: macos-latest
-            artifact_name: libMiniGC.dylib
+          - os: windows-latest
 
     steps:
       - name: Checkout
@@ -42,22 +41,37 @@ jobs:
           brew update
           brew install cmake ninja
 
-      - name: Configure
+      - name: Configure (Linux / macOS)
+        if: runner.os != 'Windows'
         run: |
           cmake -S MiniGC -B MiniGC/build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build
+      - name: Build (Linux / macOS)
+        if: runner.os != 'Windows'
         run: cmake --build MiniGC/build --parallel
 
-      - name: Verify symbol exports
-        shell: bash
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        # windows-latest ships VS 2022 (incl. msbuild) and cmake on PATH. We
+        # use the Visual Studio generator so the build produces the same
+        # MiniGC.dll layout that a developer running the vcxproj locally
+        # would get; cmake on Windows places binaries under <config>/ when
+        # using this generator, which is why the verify step looks under
+        # Release/MiniGC.dll.
+        shell: pwsh
+        run: |
+          cmake -S MiniGC -B MiniGC/build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake --build MiniGC/build --config Release --parallel
+
+      - name: Verify symbol exports (Linux)
+        if: runner.os == 'Linux'
         run: |
           set -e
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            DYLIB="MiniGC/build/libMiniGC.so"
-          else
-            DYLIB="MiniGC/build/libMiniGC.dylib"
-          fi
+          DYLIB="MiniGC/build/libMiniGC.so"
           if [ ! -f "$DYLIB" ]; then
             echo "ERROR: $DYLIB was not produced"
             ls -la MiniGC/build/
@@ -65,11 +79,51 @@ jobs:
           fi
           # The two entry points CoreCLR dlopen()s. Their absence means the
           # hidden-visibility settings broke the GC-EE contract.
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            objdump -T "$DYLIB" | grep -E ' GC_Initialize$| GC_VersionInfo$'
-          else
-            nm -gU "$DYLIB" | grep -E '_GC_Initialize$|_GC_VersionInfo$'
+          objdump -T "$DYLIB" | grep -E ' GC_Initialize$| GC_VersionInfo$'
+
+      - name: Verify symbol exports (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          DYLIB="MiniGC/build/libMiniGC.dylib"
+          if [ ! -f "$DYLIB" ]; then
+            echo "ERROR: $DYLIB was not produced"
+            ls -la MiniGC/build/
+            exit 1
           fi
+          nm -gU "$DYLIB" | grep -E '_GC_Initialize$|_GC_VersionInfo$'
+
+      - name: Verify symbol exports (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dylib = "MiniGC/build/Release/MiniGC.dll"
+          if (-not (Test-Path $dylib)) {
+            Write-Error "$dylib was not produced"
+            Get-ChildItem MiniGC/build/ | Format-Table
+            exit 1
+          }
+          # Locate dumpbin via vswhere. The MSVC tools path varies by VS
+          # edition (Enterprise/BuildTools/Community) and by toolset version
+          # (e.g. 14.40.x under VC\Tools\MSVC\), so we resolve the latest
+          # matching install rather than hardcoding a path.
+          $vs = & 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe' `
+            -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          $msvcRoot = Join-Path $vs 'VC\Tools\MSVC' | Get-ChildItem -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $dumpbin = Join-Path $msvcRoot.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          # The two entry points CoreCLR dlopen()s. Their absence means the
+          # hidden-visibility settings broke the GC-EE contract. The trailing
+          # '$' in the regex anchors the match so GC_InitializeFoo doesn't
+          # spuriously match.
+          $matches = & $dumpbin /EXPORTS $dylib |
+            Select-String -Pattern ' GC_Initialize$| GC_VersionInfo$'
+          if (-not $matches) {
+            Write-Error "GC_Initialize / GC_VersionInfo not found in $dylib exports"
+            exit 1
+          }
 
       - name: Build GcDemo (BCL only, no NuGet)
         run: dotnet build GcDemo/GcDemo.csproj -c Release
